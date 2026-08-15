@@ -372,18 +372,20 @@ main{
 }
 
 .student-name-wrap{ flex:1; min-width:0; }
-.student-name{ font-family:'Segoe UI',Tahoma,Arial,sans-serif; font-size:14px; font-weight:800; color:var(--cream); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.student-name{ font-family:'ThmanyahSans'; font-size:14px; font-weight:800; color:var(--cream); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .student-tag{ font-size:9.5px; font-weight:600; color:var(--cream-faint); margin-top:1px; }
 
 .coupon-count{ display:flex; align-items:baseline; gap:4px; flex:none; }
 .coupon-count b{ font-family:'ThmanyahSans'; font-size:13.5px; font-weight:900; color:var(--brass-soft); }
 .coupon-count span{ font-size:8.5px; font-weight:700; color:var(--cream-faint); }
-.coupon-count.redeemed-count{ flex-direction:column; align-items:flex-end; gap:1px; }
+.coupon-count.redeemed-count{ flex-direction:column; align-items:flex-end; gap:2px; }
 .coupon-count.redeemed-count .count-line{ display:flex; align-items:baseline; gap:4px; }
-.coupon-count.redeemed-count b{ position:relative; color:var(--cream-faint); }
+.coupon-count.redeemed-count b{ position:relative; color:var(--cream-faint); padding:0 2px; }
 .coupon-count.redeemed-count b .strike{
-  position:absolute; right:-3px; left:-3px; top:50%; height:2px;
-  background:#d1483a; border-radius:2px; transform:rotate(-8deg);
+  position:absolute; left:-6px; right:-6px; top:38%; height:11px;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 14'><path d='M2,8.5 C 14,4 22,11.5 34,7 C 46,2.5 54,11 66,6.5 C 78,2.5 88,10 98,5.5' fill='none' stroke='%23d1483a' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat:no-repeat; background-size:100% 100%;
+  pointer-events:none; transform:rotate(-1.5deg);
 }
 .remaining-note{ font-size:8.5px; font-weight:800; color:var(--olive-light); }
 
@@ -399,10 +401,16 @@ main{
   pointer-events:none;
 }
 .redeemed-badge{
-  font-family:'ThmanyahSans'; font-size:13px; font-weight:800;
-  color:#1c1404; background: linear-gradient(135deg, var(--brass-soft), var(--brass));
-  padding:8px 20px; border-radius:999px;
-  box-shadow:0 6px 16px rgba(0,0,0,0.35);
+  font-family:'ThmanyahSans'; font-size:12.5px; font-weight:800;
+  color:var(--cream);
+  background: rgba(18,28,20,0.4);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  border: 1.4px solid rgba(230,191,101,0.45);
+  padding:9px 22px; border-radius:14px;
+  box-shadow:0 10px 26px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.07);
+  letter-spacing:.2px;
+  white-space:nowrap;
 }
 
 .badge{ position:relative; width:56px; flex:none; display:flex; flex-direction:column; align-items:center; gap:3px; }
@@ -625,23 +633,40 @@ function digitsIn(str){
 }
 
 // matches forms like: "10 (تم صرف الكوبون)"  or  "15 (تم صرف 5 كوبون)"
-var REDEEMED_RE = /(\d+)\s*[\(\uFF08]\s*تم\s*صرف\s*(\d+)?\s*(?:ال)?كوبون\S*\s*[\)\uFF09]/;
+// the leading number is optional here on purpose — some cells may only contain
+// the parenthetical note without repeating the total, so we fall back to any
+// other digits in the cell, and finally to the last known total for that name.
+var REDEEMED_RE = /(\d+)?\s*[\(\uFF08]\s*تم\s*صرف\s*(\d+)?\s*(?:ال)?كوبون\S*\s*[\)\uFF09]/;
+var REDEEMED_KEYWORD_RE = /صرف/;
 
-function parseRedemptionText(text){
-  var m = normalizeDigits(text).match(REDEEMED_RE);
-  if(!m) return null;
-  var total = Number(m[1]);
-  var spent = (m[2] !== undefined && m[2] !== "") ? Number(m[2]) : total;
-  var remaining = Math.max(0, total - spent);
-  return {total: total, spent: spent, remaining: remaining};
+function parseRedemptionText(text, fallbackTotal){
+  var norm = normalizeDigits(text);
+  var m = norm.match(REDEEMED_RE);
+  var hasFallback = (fallbackTotal !== null && fallbackTotal !== undefined);
+
+  if(m){
+    var total = (m[1] !== undefined && m[1] !== "") ? Number(m[1])
+      : (hasFallback ? fallbackTotal : (digitsIn(norm) || 0));
+    var spent = (m[2] !== undefined && m[2] !== "") ? Number(m[2]) : total;
+    var remaining = Math.max(0, total - spent);
+    return {total: total, spent: spent, remaining: remaining};
+  }
+  // looser fallback: the cell clearly says "صرف" (spent) but doesn't match the
+  // exact expected phrasing — still treat as redeemed instead of dropping the row.
+  if(REDEEMED_KEYWORD_RE.test(norm)){
+    var anyNum = digitsIn(norm);
+    var total2 = anyNum !== null ? anyNum : (hasFallback ? fallbackTotal : 0);
+    return {total: total2, spent: total2, remaining: 0};
+  }
+  return null;
 }
 
-function buildEntry(name, countCell){
+function buildEntry(name, countCell, fallbackTotal){
   var cleanName = String(name).trim();
   if(!cleanName) return null;
 
   var countText = cellRawText(countCell);
-  var redemption = parseRedemptionText(countText);
+  var redemption = parseRedemptionText(countText, fallbackTotal);
   if(redemption){
     return {
       name: cleanName, count: redemption.total, redeemed: true,
@@ -649,9 +674,10 @@ function buildEntry(name, countCell){
     };
   }
 
+  // never drop a named student just because the count cell is empty or
+  // unparseable — default to 0 rather than disappearing from the board.
   var num = digitsIn(countText);
-  if(num === null) return null;
-  return {name: cleanName, count: num, redeemed: false};
+  return {name: cleanName, count: (num === null ? 0 : num), redeemed: false};
 }
 
 function parseGviz(text){
@@ -666,11 +692,13 @@ function parseGviz(text){
     var rawN1 = cellRawText(c[0]).trim();
     var rawN2 = cellRawText(c[3]).trim();
     if(rawN1){
-      var e1 = buildEntry(rawN1, c[1]);
+      var fb1 = state.frozenCounts[rawN1];
+      var e1 = buildEntry(rawN1, c[1], fb1);
       if(e1) h1.push(e1);
     }
     if(rawN2){
-      var e2 = buildEntry(rawN2, c[4]);
+      var fb2 = state.frozenCounts[rawN2];
+      var e2 = buildEntry(rawN2, c[4], fb2);
       if(e2) h2.push(e2);
     }
   });
@@ -944,10 +972,10 @@ function studentCardHtml(s, rank){
   }
 
   var remainingHtml = (s.redeemed && s.remaining !== null && s.remaining > 0)
-    ? '<span class="remaining-note">'+s.remaining+' كوبون متبقي</span>'
+    ? '<span class="remaining-note">متبقي '+s.remaining+' كوبون</span>'
     : "";
   var countHtml = s.redeemed
-    ? '<div class="coupon-count redeemed-count"><span class="count-line"><b>'+s.count+'<span class="strike"></span></b><span>كوبون</span></span>'+remainingHtml+'</div>'
+    ? '<div class="coupon-count redeemed-count">'+remainingHtml+'<span class="count-line"><b>'+s.count+'<span class="strike"></span></b><span>كوبون</span></span></div>'
     : '<div class="coupon-count"><b>'+s.count+'</b><span>كوبون</span></div>';
 
   var redeemedOverlay = s.redeemed
